@@ -59,7 +59,7 @@ X_train, X_test, y_train, y_test = train_test_split(
 
 # --- GENETIC ALGORITHM ---
 num_features, num_classes = X_train.shape[1], len(np.unique(y_encoded))
-POP_SIZE, GENERATIONS = 50, 200
+POP_SIZE, GENERATIONS = 100, 200
 
 def fitness(weights):
     preds = np.argmax(np.dot(X_train, weights), axis=1)

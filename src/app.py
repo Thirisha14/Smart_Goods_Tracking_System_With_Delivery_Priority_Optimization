@@ -1,74 +1,85 @@
 import streamlit as st
 import pandas as pd
-import joblib
 import numpy as np
+import joblib
+import sys
 from pathlib import Path
-import matplotlib.pyplot as plt
+from streamlit_folium import st_folium
+import folium
+from geopy.geocoders import Nominatim
 
-# --- PATH SETUP ---
-BASE_DIR = Path(__file__).resolve().parent.parent
-MODEL_PATH = BASE_DIR / "data" / "trained_ga_model.pkl"
-CHART_PATH = BASE_DIR / "data" / "training_results_chart.png"
-OUTPUT_PATH = BASE_DIR / "data" / "delivery_simulation_output.csv"
+# --- CONFIG & PATHS ---
+st.set_page_config(page_title="Smart Goods Tracker", layout="wide")
+CURRENT_DIR = Path(__file__).resolve().parent
+ROOT_DIR = CURRENT_DIR.parent
+MODEL_PATH = ROOT_DIR / "data" / "trained_ga_model.pkl"
+OUTPUT_PATH = ROOT_DIR / "data" / "delivery_simulation_output.csv"
 
-st.set_page_config(page_title="Amazon Delivery Optimizer", layout="wide")
+# --- LOAD AI MODEL ---
+@st.cache_resource
+def load_ai_brain():
+    if not MODEL_PATH.exists(): return None
+    return joblib.load(MODEL_PATH)
 
-# --- HEADER ---
-st.title("Amazon Delivery Optimization Prototype")
-st.markdown("### Genetic Algorithm & Resource Escalation System")
+model_data = load_ai_brain()
 
-# --- SIDEBAR: AI MODEL STATUS ---
-st.sidebar.header("AI Model Status")
-try:
-    model_data = joblib.load(MODEL_PATH)
-    st.sidebar.success("GA Model Loaded Successfully")
-    st.sidebar.info(f"Features Used: {', '.join(model_data['features'])}")
-except:
-    st.sidebar.error("Model not found. Please run training first.")
+# --- DYNAMIC DATA SIMULATION ---
+def get_area_name(lat, lon):
+    try:
+        geolocator = Nominatim(user_agent="smart_tracker")
+        location = geolocator.reverse(f"{lat}, {lon}", timeout=3)
+        return location.address.split(',')[0] if location else "Colombo Sector"
+    except: return f"Zone {round(lat, 2)}"
 
-# --- MAIN CONTENT: TABS ---
-tab1, tab2, tab3 = st.tabs(["Model Performance", " Run Simulation", " Delivery Logs"])
+def get_live_weather(lat, lon):
+    idx = int((abs(lat) + abs(lon)) * 100) % 5
+    return ["Stormy", "Sandstorms", "Windy", "Cloudy", "Sunny"][idx]
+
+def get_traffic_status(lat, lon):
+    idx = int((abs(lat) * abs(lon)) * 1000) % 4
+    return ["Jam", "High", "Medium", "Low"][idx]
+
+# --- UI TABS ---
+st.title("📦 Smart Goods Tracking System")
+tab1, tab2 = st.tabs(["📍 Live Map Inspector", "📊 Fleet Optimization"])
 
 with tab1:
-    st.header("Proof of Learning (20% Test Set)")
-    if CHART_PATH.exists():
-        st.image(str(CHART_PATH), caption="Confusion Matrix: Predicted vs Actual")
-    else:
-        st.warning("Training chart not found.")
+    col_map, col_res = st.columns([2, 1])
+    with col_map:
+        m = folium.Map(location=[6.9271, 79.8612], zoom_start=12)
+        map_output = st_folium(m, height=500, width=700)
+    
+    with col_res:
+        if map_output.get("last_clicked"):
+            lat, lon = map_output["last_clicked"]["lat"], map_output["last_clicked"]["lng"]
+            area, weather, traffic = get_area_name(lat, lon), get_live_weather(lat, lon), get_traffic_status(lat, lon)
+            
+            st.metric("Area", area)
+            st.write(f"**Weather:** {weather} | **Traffic:** {traffic}")
+            
+            if model_data:
+                # Prepare data for Genetic Algorithm 
+                input_row = {"Type_of_vehicle": "motorcycle", "Type_of_order": "Snack", 
+                            "Weather": weather, "Traffic": traffic, "Festival": "No", "City": "Metropolitian"}
+                encoded = [model_data['feature_encoders'][f].transform([input_row[f]])[0] for f in model_data['features']]
+                scores = np.dot([encoded], model_data['weights'])
+                priority = model_data['target_encoder'].inverse_transform([np.argmax(scores)])[0]
+                
+                if priority == "High":
+                    st.error(f"### {priority.upper()} PRIORITY")
+                    st.warning("🚨 **Escalation Logic Triggered:** Moving to Van support.")
+                else:
+                    st.success(f"### {priority.upper()} Priority")
+        else:
+            st.info("Click the map to analyze a location.")
 
 with tab2:
-    st.header("Optimization Engine")
-    col1, col2 = st.columns(2)
+    if st.button("🚀 Run Global Optimization Engine"):
+        import subprocess
+        subprocess.run([sys.executable, str(CURRENT_DIR / "priority_engine.py")])
+        st.rerun()
     
-    with col1:
-        st.subheader("Resource Constraints")
-        st.write("- **Bicycles:** 10 Units")
-        st.write("- **Motorcycles:** 50 Units")
-        st.write("- **Vans (Escalation):** 5000 Units")
-
-    with col2:
-        if st.button("▶ Run Full Optimization Pipeline"):
-            with st.spinner("Processing 40,000+ orders..."):
-                # This calls your existing logic
-                import subprocess
-                import sys
-                subprocess.run([sys.executable, "src/priority_engine.py"])
-                st.success("Optimization Complete!")
-
-with tab3:
-    st.header("Real-Time Dispatch Log")
     if OUTPUT_PATH.exists():
-        df_out = pd.read_csv(OUTPUT_PATH)
-        
-        # Stats Cards
-        c1, c2, c3 = st.columns(3)
-        succ = (df_out['Status'] == 'Delivered').mean() * 100
-        esc = df_out[df_out['Escalated'] == 'Yes'].shape[0]
-        
-        c1.metric("Total Success Rate", f"{succ:.2f}%")
-        c2.metric("Escalations to Van", esc)
-        c3.metric("High Priority Success", "29.32%") # Based on your previous run
-        
-        st.dataframe(df_out.head(100)) # Show first 100 rows
-    else:
-        st.info("Run the simulation to see logs.")
+        df = pd.read_csv(OUTPUT_PATH)
+        st.metric("Delivery Success Rate", f"{(len(df[df['Status']=='Delivered'])/len(df))*100:.2f}%")
+        st.dataframe(df.sample(50))
