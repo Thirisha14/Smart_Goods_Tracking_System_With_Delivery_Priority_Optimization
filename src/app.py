@@ -255,11 +255,19 @@ def get_area_name(lat, lon):
     return f"({round(lat,3)}°N, {round(lon,3)}°E)"
 
 def rule_priority(traffic_label, weather_label):
-    """Mirror exact logic from train_model.py."""
-    if traffic_label == "Jam"  and weather_label == "Stormy": return "High"
-    if traffic_label == "Jam"  and weather_label != "Stormy": return "Medium"
-    if traffic_label == "High" and weather_label in ("Stormy","Rainy"): return "Medium"
-    if weather_label == "Stormy": return "Medium"
+
+    # HIGH PRIORITY
+    if traffic_label == "Jam" and weather_label in ("Stormy", "Rainy"):
+        return "High"
+
+    if traffic_label == "High" and weather_label in ("Stormy", "Rainy"):
+        return "High"
+
+    # MEDIUM PRIORITY
+    if traffic_label == "Jam":
+        return "Medium"
+
+    # LOW PRIORITY
     return "Low"
 
 def model_priority(weather_label, traffic_label, delivery_time=45, category="Grocery"):
@@ -585,17 +593,18 @@ elif st.session_state.page == "map":
             </div>
             """, unsafe_allow_html=True)
 
-            # Prediction rule explanation
+           # Prediction rule explanation
             with st.expander("🔍 See prediction rule"):
                 rules = [
-                    ("Jam + Stormy → **HIGH**",   "red"),
-                    ("Jam + Any weather → **MEDIUM**", "orange"),
-                    ("High traffic + Stormy/Rainy → **MEDIUM**", "orange"),
-                    ("Everything else → **LOW**",  "green"),
+                    ("Jam + Stormy → **HIGH**", "red"),
+                    ("Jam + Rainy → **HIGH**", "red"),
+                    ("High traffic + Stormy → **HIGH**", "red"),
+                    ("High traffic + Rainy → **HIGH**", "red"),
+                    ("Jam + Other weather → **MEDIUM**", "orange"),
+                    ("Everything else → **LOW**", "green"),
                 ]
                 for rule, c in rules:
                     st.markdown(f"- :{c}[{rule}]")
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # PAGE: PARCEL ENTRY
 # ═══════════════════════════════════════════════════════════════════════════════

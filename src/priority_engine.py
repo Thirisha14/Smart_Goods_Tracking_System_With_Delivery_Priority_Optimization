@@ -1,81 +1,107 @@
 import pandas as pd
 from pathlib import Path
 
-# --- PATH SETUP ---
+# ─────────────────────────────────────────────
+# PATHS
+# ─────────────────────────────────────────────
 BASE_DIR = Path(__file__).resolve().parent.parent
+# Use the updated CSV for testing
 DATA_PATH = BASE_DIR / "data" / "amazon_delivery_with_priority_and_links.csv"
 OUTPUT_PATH = BASE_DIR / "data" / "delivery_simulation_output.csv"
 
-# Load Data
+# ─────────────────────────────────────────────
+# LOAD & CLEAN
+# ─────────────────────────────────────────────
 try:
     df = pd.read_csv(DATA_PATH)
 except FileNotFoundError:
-    print(f"Error: Could not find data file at {DATA_PATH}")
-    exit()
+    print(f"ERROR: Data not found at {DATA_PATH}. Please ensure you use the updated CSV.")
+    exit(1)
 
-# --- CLEAN COLUMN NAMES ---
+# Clean column names and data
 df.columns = df.columns.str.strip()
+for col in df.columns:
+    if df[col].dtype == "object":
+        df[col] = df[col].astype(str).str.strip()
 
-# --- FIX: USE THE CORRECT COLUMN NAME ---
-# Your error log shows the column is called 'Vehicle', not 'Type_of_vehicle'
-COLUMN_NAME = 'Vehicle' 
+# ─────────────────────────────────────────────
+# STRESS TEST PRIORITY RULES (FORCED)
+# ─────────────────────────────────────────────
+severe_weather = ["Stormy", "Rainy", "Sandstorms", "Windy", "Fog"]
+heavy_traffic = ["Jam", "High"]
 
-if COLUMN_NAME not in df.columns:
-    print(f"CRITICAL ERROR: Column '{COLUMN_NAME}' not found.")
-    print(f"Available columns are: {list(df.columns)}")
-    exit()
+# Rule 1: High Priority (Severe Weather + Heavy Traffic)
+df.loc[
+    (df["Traffic"].isin(heavy_traffic)) & 
+    (df["Weather"].isin(severe_weather)), 
+    "Priority_Level"
+] = "High"
 
-df['Priority_Level'] = df['Priority_Level'].astype(str).str.strip()
+# Rule 2: Medium Priority (Either Severe Weather OR Heavy Traffic, but not both)
+df.loc[
+    ((df["Traffic"].isin(heavy_traffic)) & (~df["Weather"].isin(severe_weather))) |
+    ((~df["Traffic"].isin(heavy_traffic)) & (df["Weather"].isin(severe_weather))),
+    "Priority_Level"
+] = "Medium"
 
-# 1. OPTIMIZATION: URGENCY SORTING
-p_rank = {"High": 0, "Medium": 1, "Low": 2}
-df['sort_key'] = df['Priority_Level'].map(p_rank).fillna(3)
-df = df.sort_values('sort_key').drop('sort_key', axis=1)
+# Rule 3: Low Priority (Clear skies and Low Traffic)
+df.loc[
+    (~df["Traffic"].isin(heavy_traffic)) & 
+    (~df["Weather"].isin(severe_weather)), 
+    "Priority_Level"
+] = "Low"
 
-# 2. INCREASED CAPACITY (Fixes 11.66% Success Rate)
-CAPACITY = {
-    "bicycle": 1000,       
-    "motorcycle": 5000,   
-    "scooter": 3000,      
-    "van": 100000          # The global backup for escalations
-}
+print("\n--- Corrected Stress Test Distribution ---")
+print(df["Priority_Level"].value_counts())
 
+# ─────────────────────────────────────────────
+# FLEET ALLOCATION & ESCALATION
+# ─────────────────────────────────────────────
+CAPACITY = {"bicycle": 10000, 
+            "motorcycle": 50000, 
+            "scooter": 30000, 
+            "van": 10000, 
+            "truck": 50000}
+
+ESCALATION_MIN = {"High": "van", "Medium": "scooter"}
+ladder = ["bicycle", "motorcycle", "scooter", "van", "truck"]
 vehicle_load = {v: 0 for v in CAPACITY}
 results = []
 
-
-
-for _, row in df.iterrows():
-    # Use the corrected column name 'Vehicle'
-    original_vehicle = str(row[COLUMN_NAME]).lower().strip()
+for i, row in df.iterrows():
+    original_v = str(row.get("Vehicle", "motorcycle")).lower()
     priority = row["Priority_Level"]
-    assigned_vehicle = original_vehicle
-    status = "Pending"
+    assigned_v = original_v
+    escalated = False
 
-    # ESCALATION LOGIC
-    # If the original vehicle is full, escalate to a Van
-    if vehicle_load.get(original_vehicle, 0) >= CAPACITY.get(original_vehicle, 0):
-        assigned_vehicle = "van"
+    # 1. Priority-Based Escalation
+    min_req = ESCALATION_MIN.get(priority)
+    if min_req:
+        orig_idx = ladder.index(original_v) if original_v in ladder else 1
+        min_idx = ladder.index(min_req)
+        if orig_idx < min_idx:
+            assigned_v = min_req
+            escalated = True
 
-    # Check if the final assigned vehicle has space
-    if assigned_vehicle in vehicle_load and vehicle_load[assigned_vehicle] < CAPACITY[assigned_vehicle]:
-        status = "Delivered"
-        vehicle_load[assigned_vehicle] += 1
-    
+    # 2. Capacity Check (Overflow to Van)
+    if vehicle_load.get(assigned_v, 0) >= CAPACITY.get(assigned_v, 0):
+        assigned_v = "van"
+        escalated = True
+
+    # 3. Status Check
+    status = "Delivered" if vehicle_load.get(assigned_v, 0) < CAPACITY.get(assigned_v, 0) else "Pending"
+    if status == "Delivered":
+        vehicle_load[assigned_v] += 1
+
     results.append({
-        "Order_ID": row["Order_ID"],
-        "Original_Vehicle": original_vehicle,
-        "Assigned_Vehicle": assigned_vehicle,
+        "Order_ID": row.get("Order_ID", f"ORD-{i}"),
+        "Original_Vehicle": original_v,
+        "Assigned_Vehicle": assigned_v,
         "Priority": priority,
         "Status": status,
-        "Escalated": "Yes" if assigned_vehicle != original_vehicle else "No"
+        "Escalated": "Yes" if escalated else "No"
     })
 
-# Save results
-output_df = pd.DataFrame(results)
-output_df.to_csv(OUTPUT_PATH, index=False)
-
-# Final summary print
-delivered = len(output_df[output_df['Status'] == 'Delivered'])
-total = len(output_df)
-print(f"Simulation complete. Success Rate: {(delivered/total)*100:.2f}%")
+# Save output for Dashboard
+pd.DataFrame(results).to_csv(OUTPUT_PATH, index=False)
+print(f"\nSUCCESS: Simulation output saved to {OUTPUT_PATH}")
