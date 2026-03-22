@@ -5,17 +5,17 @@ from pathlib import Path
 # PATHS
 # ─────────────────────────────────────────────
 BASE_DIR = Path(__file__).resolve().parent.parent
-# Use the updated CSV for testing
-DATA_PATH = BASE_DIR / "data" / "amazon_delivery_with_priority_and_links.csv"
+# Use the updated Excel file for testing
+DATA_PATH = BASE_DIR / "data" / "amazon_delivery_with_priority_and_links.xlsx"  # Updated to .xlsx
 OUTPUT_PATH = BASE_DIR / "data" / "delivery_simulation_output.csv"
 
 # ─────────────────────────────────────────────
 # LOAD & CLEAN
 # ─────────────────────────────────────────────
 try:
-    df = pd.read_csv(DATA_PATH)
+    df = pd.read_excel(DATA_PATH)  # Read Excel instead of CSV
 except FileNotFoundError:
-    print(f"ERROR: Data not found at {DATA_PATH}. Please ensure you use the updated CSV.")
+    print(f"ERROR: Data not found at {DATA_PATH}. Please ensure you use the updated Excel file.")
     exit(1)
 
 # Clean column names and data
@@ -23,6 +23,17 @@ df.columns = df.columns.str.strip()
 for col in df.columns:
     if df[col].dtype == "object":
         df[col] = df[col].astype(str).str.strip()
+
+# Ensure Order_ID is a string and clean
+if 'Order_ID' in df.columns:
+    df['Order_ID'] = df['Order_ID'].astype(str).str.strip()
+else:
+    print("ERROR: 'Order_ID' column not found in dataset.")
+    exit(1)
+
+# Add Status column if missing
+if 'Status' not in df.columns:
+    df['Status'] = 'Pending'
 
 # ─────────────────────────────────────────────
 # STRESS TEST PRIORITY RULES (FORCED)

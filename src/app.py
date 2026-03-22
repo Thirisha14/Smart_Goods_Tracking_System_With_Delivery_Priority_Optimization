@@ -7,6 +7,8 @@ import subprocess
 import requests
 from pathlib import Path
 from datetime import datetime
+from scanner import render_qr_scanner_page
+from notifications import render_notification_board
 
 # ── streamlit_folium / folium ──────────────────────────────────────────────────
 try:
@@ -306,6 +308,11 @@ PRI_EMOJI = {"High":"🔴",      "Medium":"🟡",      "Low":"🟢"}
 # ═══════════════════════════════════════════════════════════════════════════════
 # SIDEBAR NAVIGATION
 # ═══════════════════════════════════════════════════════════════════════════════
+
+# 1. Initialize the session state if it doesn't exist (Put this at the top of main)
+if 'page' not in st.session_state:
+    st.session_state.page = "dashboard"
+
 with st.sidebar:
     st.markdown("""
     <div style="padding:16px 4px 24px;">
@@ -318,6 +325,7 @@ with st.sidebar:
         ("dashboard",   "🏠",  "Dashboard"),
         ("map",         "🗺️",  "Map Inspector"),
         ("parcel",      "📋",  "Parcel Entry"),
+        ("scan","📷","Scan QR Delivery"),
         ("fleet",       "🚚",  "Fleet Optimization"),
         ("about",       "⚙️",  "How It Works"),
     ]
@@ -338,11 +346,12 @@ with st.sidebar:
         st.caption("Run `train_model.py` first")
 
     st.markdown(f"<div style='font-size:9px;color:#334155;margin-top:8px;'>{datetime.now().strftime('%a %d %b · %H:%M')}</div>", unsafe_allow_html=True)
-
+    
 # ═══════════════════════════════════════════════════════════════════════════════
 # PAGE: DASHBOARD
 # ═══════════════════════════════════════════════════════════════════════════════
-if st.session_state.page == "dashboard":
+
+def render_dashboard():
     st.markdown("## 🏠 Operations Dashboard")
     st.markdown("<div style='color:#64748b;font-size:14px;margin-bottom:24px;'>Real-time delivery priority monitoring across Sri Lanka</div>", unsafe_allow_html=True)
 
@@ -374,65 +383,77 @@ if st.session_state.page == "dashboard":
                 pct = (count/total*100) if total else 0
                 color = PRI_COLOR[label]
                 st.markdown(f"""
-                <div style="margin-bottom:12px;">
-                    <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px;">
-                        <span style="color:{color};font-weight:700;">{PRI_EMOJI[label]} {label}</span>
-                        <span style="color:#64748b;">{count} orders · {pct:.0f}%</span>
-                    </div>
-                    <div style="height:8px;background:#0a1525;border-radius:4px;overflow:hidden;border:1px solid #1e3a5f;">
-                        <div style="height:100%;width:{pct}%;background:{color};border-radius:4px;box-shadow:0 0 8px {color}60;"></div>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-
-            st.markdown("<br/>", unsafe_allow_html=True)
-
-            # Weather breakdown
-            from collections import Counter
-            weather_counts = Counter(x["weather"] for x in log)
-            st.markdown("#### 🌤️ Weather Conditions Encountered")
-            w_icons = {"Sunny":"☀️","Cloudy":"☁️","Rainy":"🌧️","Stormy":"⛈️","Windy":"💨","Foggy":"🌫️","Drizzle":"🌦️"}
-            for w, cnt in weather_counts.most_common():
-                pct = cnt/total*100
-                st.markdown(f"""
-                <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;font-size:13px;">
-                    <span style="width:80px;color:#94a3b8;">{w_icons.get(w,'🌡️')} {w}</span>
-                    <div style="flex:1;height:6px;background:#0a1525;border-radius:3px;overflow:hidden;">
-                        <div style="height:100%;width:{pct}%;background:#3b82f6;border-radius:3px;"></div>
-                    </div>
-                    <span style="color:#64748b;width:30px;text-align:right;">{cnt}</span>
-                </div>
-                """, unsafe_allow_html=True)
-
-    with col_right:
-        st.markdown("#### 🕐 Recent Scan Activity")
-        if not log:
-            st.markdown("<div style='color:#334155;font-size:13px;padding:20px;text-align:center;'>No activity yet</div>", unsafe_allow_html=True)
-        else:
-            for entry in log[:10]:
-                color = PRI_COLOR[entry["priority"]]
-                esc_badge = " 🚐" if entry.get("escalated") else ""
-                st.markdown(f"""
-                <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;
-                            background:#0d1625;border:1px solid {color}30;border-radius:8px;margin-bottom:6px;">
-                    <div style="width:8px;height:8px;border-radius:50%;background:{color};flex-shrink:0;box-shadow:0 0 6px {color};"></div>
-                    <div style="flex:1;min-width:0;">
-                        <div style="font-size:12px;color:#cbd5e1;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
-                            {entry.get("area","Unknown Area")}
+                    <div style="margin-bottom:12px;">
+                        <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px;">
+                            <span style="color:{color};font-weight:700;">{PRI_EMOJI[label]} {label}</span>
+                            <span style="color:#64748b;">{count} orders · {pct:.0f}%</span>
                         </div>
-                        <div style="font-size:10px;color:#475569;">{entry["weather"]} · {entry["traffic"]["desc"]}</div>
+                        <div style="height:8px;background:#0a1525;border-radius:4px;overflow:hidden;border:1px solid #1e3a5f;">
+                            <div style="height:100%;width:{pct}%;background:{color};border-radius:4px;box-shadow:0 0 8px {color}60;"></div>
+                        </div>
                     </div>
-                    <div style="text-align:right;flex-shrink:0;">
-                        <div style="font-size:11px;font-weight:700;color:{color};">{entry['priority']}{esc_badge}</div>
-                        <div style="font-size:9px;color:#334155;">{entry["time"]}</div>
+                    """, unsafe_allow_html=True)
+
+                st.markdown("<br/>", unsafe_allow_html=True)
+
+                # Weather breakdown
+                from collections import Counter
+                weather_counts = Counter(x["weather"] for x in log)
+                st.markdown("#### 🌤️ Weather Conditions Encountered")
+                w_icons = {"Sunny":"☀️","Cloudy":"☁️","Rainy":"🌧️","Stormy":"⛈️","Windy":"💨","Foggy":"🌫️","Drizzle":"🌦️"}
+                for w, cnt in weather_counts.most_common():
+                    pct = cnt/total*100
+                    st.markdown(f"""
+                    <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;font-size:13px;">
+                        <span style="width:80px;color:#94a3b8;">{w_icons.get(w,'🌡️')} {w}</span>
+                        <div style="flex:1;height:6px;background:#0a1525;border-radius:3px;overflow:hidden;">
+                            <div style="height:100%;width:{pct}%;background:#3b82f6;border-radius:3px;"></div>
+                        </div>
+                        <span style="color:#64748b;width:30px;text-align:right;">{cnt}</span>
                     </div>
-                </div>
-                """, unsafe_allow_html=True)
+                    """, unsafe_allow_html=True)
+
+        with col_right:
+            st.markdown("#### 🕐 Recent Scan Activity")
+            if not log:
+                st.markdown("<div style='color:#334155;font-size:13px;padding:20px;text-align:center;'>No activity yet</div>", unsafe_allow_html=True)
+            else:
+                for entry in log[:10]:
+                    color = PRI_COLOR[entry["priority"]]
+                    esc_badge = " 🚐" if entry.get("escalated") else ""
+                    st.markdown(f"""
+                    <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;
+                                background:#0d1625;border:1px solid {color}30;border-radius:8px;margin-bottom:6px;">
+                        <div style="width:8px;height:8px;border-radius:50%;background:{color};flex-shrink:0;box-shadow:0 0 6px {color};"></div>
+                        <div style="flex:1;min-width:0;">
+                            <div style="font-size:12px;color:#cbd5e1;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                                {entry.get("area","Unknown Area")}
+                            </div>
+                            <div style="font-size:10px;color:#475569;">{entry["weather"]} · {entry["traffic"]["desc"]}</div>
+                        </div>
+                        <div style="text-align:right;flex-shrink:0;">
+                            <div style="font-size:11px;font-weight:700;color:{color};">{entry['priority']}{esc_badge}</div>
+                            <div style="font-size:9px;color:#334155;">{entry["time"]}</div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+def render_map_inspector():
+    st.title("🗺️ Map Inspector")
+    st.write("Map interface would render here.")
+
+def render_parcel_entry():
+    st.title("📋 Parcel Entry")
+    st.write("Manual entry form would render here.")
+    
+render_notification_board()
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PAGE: MAP INSPECTOR
 # ═══════════════════════════════════════════════════════════════════════════════
-elif st.session_state.page == "map":
+
+def render_map_inspector():
     st.markdown("## 🗺️ Live Map Inspector")
     st.markdown("<div style='color:#64748b;font-size:14px;margin-bottom:16px;'>Click anywhere on Sri Lanka to get live weather, traffic, and delivery priority prediction.</div>", unsafe_allow_html=True)
 
@@ -608,7 +629,8 @@ elif st.session_state.page == "map":
 # ═══════════════════════════════════════════════════════════════════════════════
 # PAGE: PARCEL ENTRY
 # ═══════════════════════════════════════════════════════════════════════════════
-elif st.session_state.page == "parcel":
+
+def render_parcel_entry():
     st.markdown("## 📋 Parcel Entry & Priority Assessment")
     st.markdown("<div style='color:#64748b;font-size:14px;margin-bottom:24px;'>Enter parcel details manually to get an instant GA-based priority prediction and vehicle assignment.</div>", unsafe_allow_html=True)
 
@@ -634,7 +656,7 @@ elif st.session_state.page == "parcel":
             traffic_sel = st.selectbox("Traffic", ["Low","Medium","High","Jam"])
 
             submitted = st.form_submit_button("🚀 Predict Priority & Assign Vehicle", use_container_width=True)
-
+    
     with col_result:
         st.markdown("#### 🤖 AI Assessment Result")
 
@@ -733,7 +755,7 @@ elif st.session_state.page == "parcel":
 # ═══════════════════════════════════════════════════════════════════════════════
 # PAGE: FLEET OPTIMIZATION
 # ═══════════════════════════════════════════════════════════════════════════════
-elif st.session_state.page == "fleet":
+def render_fleet_optimization():
     st.markdown("## 🚚 Fleet Optimization Engine")
     st.markdown("<div style='color:#64748b;font-size:14px;margin-bottom:24px;'>Run the Genetic Algorithm pipeline to train the model, predict priorities across all orders, and optimally allocate the vehicle fleet.</div>", unsafe_allow_html=True)
 
@@ -843,7 +865,7 @@ elif st.session_state.page == "fleet":
 # ═══════════════════════════════════════════════════════════════════════════════
 # PAGE: HOW IT WORKS
 # ═══════════════════════════════════════════════════════════════════════════════
-elif st.session_state.page == "about":
+def render_about_page():
     st.markdown("## ⚙️ How It Works")
 
     tab1, tab2, tab3, tab4 = st.tabs(["🧬 Genetic Algorithm","📊 Priority Logic","🚐 Escalation","🏗️ Architecture"])
@@ -999,3 +1021,14 @@ df.loc[df['Priority_Level'].isna(), 'Priority_Level'] = 'Low'
         Genetic Algorithm · Real-time Weather · Fleet Escalation
     </div>
     """, unsafe_allow_html=True)
+    
+page = st.session_state.page 
+
+if page == "dashboard":
+    render_dashboard()
+elif page == "scan":
+    render_qr_scanner_page()
+elif page == "map":
+    render_map_inspector()
+elif page == "parcel":
+    render_parcel_entry()
