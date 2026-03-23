@@ -1,0 +1,7 @@
+{
+    "admin1": {
+        "password": "adminpassword",
+        "role": "Admin",
+        "name": "Project Supervisor"
+    }
+}

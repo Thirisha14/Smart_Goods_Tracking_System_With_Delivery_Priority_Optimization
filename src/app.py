@@ -5,6 +5,7 @@ import joblib
 import sys
 import subprocess
 import requests
+import json
 from pathlib import Path
 from datetime import datetime
 from scanner import render_qr_scanner_page
@@ -25,6 +26,15 @@ try:
 except ImportError:
     HAS_GEOPY = False
 
+# --- NEW: LOGIN HELPER FUNCTION ---
+def load_users():
+    user_file = Path("data/users.json")
+    if user_file.exists():
+        with open(user_file, "r") as f:
+            return json.load(f)
+    # Default fallback if file is missing
+    return {"admin1": {"password": "adminpassword", "role": "Admin", "name": "System Admin"}}
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # PAGE CONFIG  (must be first Streamlit call)
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -34,7 +44,37 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+                   
+# --- NEW: AUTHENTICATION CHECK ---
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
 
+# ── 1. LOGIN INTERFACE (SHOWN FIRST) ──────────────────────────────────────────
+if not st.session_state.authenticated:
+    _, col2, _ = st.columns([1, 1.5, 1])
+    with col2:
+        st.markdown("<br><br>", unsafe_allow_html=True)
+        st.title("🔐 DeliveryIQ Admin Portal")
+        st.subheader("Internal Management Access")
+        
+        with st.form("login_form"):
+            username = st.text_input("Administrator ID")
+            password = st.text_input("Password", type="password")
+            submit = st.form_submit_button("Access System", use_container_width=True)
+            
+            if submit:
+                users = load_users()
+                if username in users and users[username]["password"] == password:
+                    if users[username]["role"] == "Admin":
+                        st.session_state.authenticated = True
+                        st.session_state.user_name = users[username]["name"]
+                        st.rerun()
+                    else:
+                        st.error("Access Denied: Admin Privileges Required.")
+                else:
+                    st.error("Invalid Admin ID or Password.")
+    st.stop() # Stops execution here so nothing below is shown
+             
 # ═══════════════════════════════════════════════════════════════════════════════
 # PATHS
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -152,7 +192,7 @@ h2, h3 { color: #e2e8f0 !important; font-weight: 700 !important; }
 hr { border-color: #1e3a5f !important; }
 </style>
 """, unsafe_allow_html=True)
-
+    
 # ═══════════════════════════════════════════════════════════════════════════════
 # SESSION STATE DEFAULTS
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -305,6 +345,12 @@ PRI_COLOR = {"High":"#ef4444", "Medium":"#f97316", "Low":"#22c55e"}
 PRI_BG    = {"High":"#1c0505", "Medium":"#1c0c00", "Low":"#001c08"}
 PRI_EMOJI = {"High":"🔴",      "Medium":"🟡",      "Low":"🟢"}
 
+# Add a logout button to your existing sidebar logic
+st.sidebar.markdown(f"**Admin:** {st.session_state.user_name}")
+if st.sidebar.button("🔓 Logout"):
+    st.session_state.authenticated = False
+    st.rerun()
+    
 # ═══════════════════════════════════════════════════════════════════════════════
 # SIDEBAR NAVIGATION
 # ═══════════════════════════════════════════════════════════════════════════════
