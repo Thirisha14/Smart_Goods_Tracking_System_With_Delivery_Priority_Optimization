@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 from datetime import datetime
 from scanner import render_qr_scanner_page
-from notifications import render_notification_board
+from notifications import add_notification, render_notification_board
 
 # ── streamlit_folium / folium ──────────────────────────────────────────────────
 try:
@@ -74,6 +74,46 @@ if not st.session_state.authenticated:
                 else:
                     st.error("Invalid Admin ID or Password.")
     st.stop() # Stops execution here so nothing below is shown
+    
+# ═══════════════════════════════════════════════════════════════════════════════
+# GLOBAL STYLING (Kills top gap and forces white text everywhere)
+# ═══════════════════════════════════════════════════════════════════════════════
+st.markdown("""
+    <style>
+    /* 1. Eliminate the top gap for the entire app */
+    .block-container {
+        padding-top: 0rem !important;
+        padding-bottom: 0rem !important;
+        margin-top: -2rem !important;
+    }
+
+    /* 2. Hide the header bar completely */
+    header {
+        visibility: hidden;
+        height: 0px !important;
+    }
+
+    /* 3. Global Color Fixes (White text for all standard elements) */
+    .stMarkdown, p, li, h1, h2, h3, h4, span, label {
+        color: #ffffff !important;
+    }
+
+    /* 4. Ensure tables are visible against dark background */
+    table {
+        color: white !important;
+        border: 1px solid #1e3a5f !important;
+    }
+    th {
+        background-color: #1e3a5f !important;
+        color: white !important;
+    }
+    
+    /* 5. Fix for tab text visibility */
+    button[data-baseweb="tab"] p {
+        color: white !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
              
 # ═══════════════════════════════════════════════════════════════════════════════
 # PATHS
@@ -672,10 +712,6 @@ def render_map_inspector():
                 ]
                 for rule, c in rules:
                     st.markdown(f"- :{c}[{rule}]")
-# ═══════════════════════════════════════════════════════════════════════════════
-# PAGE: PARCEL ENTRY
-# ═══════════════════════════════════════════════════════════════════════════════
-
 def render_parcel_entry():
     st.markdown("## 📋 Parcel Entry & Priority Assessment")
     st.markdown("<div style='color:#64748b;font-size:14px;margin-bottom:24px;'>Enter parcel details manually to get an instant GA-based priority prediction and vehicle assignment.</div>", unsafe_allow_html=True)
@@ -707,88 +743,83 @@ def render_parcel_entry():
         st.markdown("#### 🤖 AI Assessment Result")
 
         if submitted:
-            # Run prediction
+            if not order_id:
+                st.error("Please enter an Order ID first!")
+                return
+
+            # 1. RUN PREDICTION (Using your priority_engine logic)
+            # model_priority and escalate should be imported at the top of app.py
             priority = model_priority(weather_sel, traffic_sel, delivery_time, category)
             assigned_v, escalated, esc_reason = escalate(priority, vehicle)
             color = PRI_COLOR[priority]
 
-            # Simulate GA score
-            scores_demo = {
-                "High":   round(np.random.uniform(0.75, 0.95), 3) if priority=="High"   else round(np.random.uniform(0.05, 0.25), 3),
-                "Medium": round(np.random.uniform(0.60, 0.85), 3) if priority=="Medium" else round(np.random.uniform(0.05, 0.30), 3),
-                "Low":    round(np.random.uniform(0.70, 0.92), 3) if priority=="Low"    else round(np.random.uniform(0.05, 0.25), 3),
+            # 2. PERSISTENCE: SAVE TO CSV FOR SCANNER
+            output_path = Path("data/delivery_simulation_output.csv")
+            new_record = {
+                "Order_ID": order_id,
+                "Category": category,
+                "Priority_Level": priority,
+                "Vehicle": vehicle,
+                "Assigned_Vehicle": assigned_v,
+                "Destination": city,
+                "Status": "Pending",
+                "Escalated": "Yes" if escalated else "No"
             }
 
+            try:
+                if output_path.exists():
+                    df_all = pd.read_csv(output_path)
+                else:
+                    df_all = pd.DataFrame()
+                
+                df_all = pd.concat([df_all, pd.DataFrame([new_record])], ignore_index=True)
+                df_all.to_csv(output_path, index=False)
+            except Exception as e:
+                st.error(f"Database Sync Error: {e}")
+
+            # 3. PERSISTENCE: SAVE NOTIFICATION TO JSON
+            # add_notification should be imported from notifications.py
+            add_notification(
+                order_id=order_id, 
+                message=f"New {priority} priority parcel assigned to {assigned_v}.", 
+                status_type="dispatched"
+            )
+
+            # 4. UI DISPLAY
             st.markdown(f"""
             <div style="background:{PRI_BG[priority]};border:2px solid {color};
-                        border-radius:14px;padding:24px;margin-bottom:16px;text-align:center;
-                        box-shadow:0 0 24px {color}30;">
+                        border-radius:14px;padding:24px;margin-bottom:16px;text-align:center;">
                 <div style="font-size:10px;color:{color};letter-spacing:4px;">DELIVERY PRIORITY</div>
                 <div style="font-size:52px;margin:8px 0;">{PRI_EMOJI[priority]}</div>
                 <div style="font-size:32px;font-weight:900;color:{color};">{priority.upper()}</div>
                 <div style="font-size:12px;color:{color};opacity:0.7;margin-top:6px;">
-                    Order {order_id or "N/A"} · {category}
+                    Order {order_id} · {category}
                 </div>
             </div>
             """, unsafe_allow_html=True)
 
-            # Details grid
-            st.markdown(f"""
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;">
-                <div style="background:#0d1625;border:1px solid #1e3a5f;border-radius:8px;padding:12px;">
-                    <div style="font-size:9px;color:#334155;letter-spacing:2px;">WEATHER</div>
-                    <div style="font-size:14px;font-weight:600;color:#f1f5f9;margin-top:2px;">{weather_sel}</div>
-                </div>
-                <div style="background:#0d1625;border:1px solid #1e3a5f;border-radius:8px;padding:12px;">
-                    <div style="font-size:9px;color:#334155;letter-spacing:2px;">TRAFFIC</div>
-                    <div style="font-size:14px;font-weight:600;color:#f1f5f9;margin-top:2px;">{traffic_sel}</div>
-                </div>
-                <div style="background:#0d1625;border:1px solid #1e3a5f;border-radius:8px;padding:12px;">
-                    <div style="font-size:9px;color:#334155;letter-spacing:2px;">REQUESTED</div>
-                    <div style="font-size:14px;font-weight:600;color:#f1f5f9;margin-top:2px;">{vehicle}</div>
-                </div>
-                <div style="background:#0d1625;border:{'1.5px solid #a78bfa' if escalated else '1px solid #22c55e'};border-radius:8px;padding:12px;">
-                    <div style="font-size:9px;color:#334155;letter-spacing:2px;">ASSIGNED {'🚐 ESCALATED' if escalated else '✅'}</div>
-                    <div style="font-size:14px;font-weight:700;color:{'#a78bfa' if escalated else '#22c55e'};margin-top:2px;text-transform:uppercase;">{assigned_v}</div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-
-            st.markdown(f"""
-            <div style="background:#0d1625;border:1px solid #1e3a5f;border-radius:8px;padding:12px;margin-bottom:14px;">
-                <div style="font-size:9px;color:#334155;letter-spacing:2px;margin-bottom:4px;">ESCALATION REASON</div>
-                <div style="font-size:12px;color:#94a3b8;">{esc_reason}</div>
-            </div>
-            """, unsafe_allow_html=True)
-
-            # GA confidence scores
+            # 5. GA CONFIDENCE SCORES (Simulated)
             st.markdown("**GA Model Confidence Scores**")
+            scores_demo = {
+                "High": round(np.random.uniform(0.8, 0.98), 2) if priority == "High" else round(np.random.uniform(0.01, 0.2), 2),
+                "Medium": round(np.random.uniform(0.8, 0.98), 2) if priority == "Medium" else round(np.random.uniform(0.01, 0.2), 2),
+                "Low": round(np.random.uniform(0.8, 0.98), 2) if priority == "Low" else round(np.random.uniform(0.01, 0.2), 2),
+            }
+            
             for label, score in scores_demo.items():
-                c = PRI_COLOR[label]
                 pct = int(score * 100)
                 st.markdown(f"""
                 <div style="margin-bottom:8px;">
-                    <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px;">
-                        <span style="color:{c};">{PRI_EMOJI[label]} {label}</span>
-                        <span style="color:#64748b;">{pct}%</span>
+                    <div style="display:flex;justify-content:space-between;font-size:11px;">
+                        <span>{label}</span><span>{pct}%</span>
                     </div>
-                    <div style="height:5px;background:#0a1525;border-radius:3px;overflow:hidden;">
-                        <div style="height:100%;width:{pct}%;background:{c};border-radius:3px;"></div>
+                    <div style="height:6px;background:#0d1625;border-radius:3px;">
+                        <div style="height:100%;width:{pct}%;background:{PRI_COLOR[label]};border-radius:3px;"></div>
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
 
-            # Add to scan log
-            st.session_state.scan_log = [{
-                "lat": None, "lon": None,
-                "area": f"{city} — {order_id or 'Manual Entry'}",
-                "weather": weather_sel,
-                "traffic": {"desc": traffic_sel, "label": traffic_sel, "color": "#3b82f6", "icon":"🚦", "score":50},
-                "priority": priority,
-                "escalated": escalated,
-                "vehicle": assigned_v,
-                "time": datetime.now().strftime("%H:%M"),
-            }] + st.session_state.scan_log[:49]
+            st.success("✅ Assessment Complete. Notification Sent to Customer Portal.")
 
         else:
             st.markdown("""
@@ -816,7 +847,7 @@ def render_fleet_optimization():
             st.markdown(f"""
             <div style="background:#0d1625;border:1px solid #1e3a5f;border-radius:12px;padding:18px;text-align:center;margin-bottom:20px;">
                 <div style="font-size:28px;">{icon}</div>
-                <div style="font-size:9px;color:#334155;letter-spacing:3px;margin-top:8px;">STEP {num}</div>
+                <div style="font-size:9px;color:white;letter-spacing:3px;margin-top:8px;">STEP {num}</div>
                 <div style="font-size:14px;font-weight:700;color:#f1f5f9;margin-top:4px;">{title}</div>
                 <div style="font-size:11px;color:#64748b;margin-top:6px;">{desc}</div>
             </div>
@@ -912,63 +943,86 @@ def render_fleet_optimization():
 # PAGE: HOW IT WORKS
 # ═══════════════════════════════════════════════════════════════════════════════
 def render_about_page():
+    
     st.markdown("## ⚙️ How It Works")
+
+    # Injecting a small CSS fix to ensure headers and standard text are white
+    st.markdown("""
+        <style>
+        .white-text { color: white !important; }
+        .white-text h3, .white-text h4, .white-text li, .white-text p { color: white !important; }
+        th, td { color: white !important; border: 1px solid #1e3a5f !important; }
+        </style>
+    """, unsafe_allow_html=True)
 
     tab1, tab2, tab3, tab4 = st.tabs(["🧬 Genetic Algorithm","📊 Priority Logic","🚐 Escalation","🏗️ Architecture"])
 
     with tab1:
         st.markdown("""
-        ### Genetic Algorithm for Delivery Optimization
+        <div class="white-text">
+        <h3>Genetic Algorithm for Delivery Optimization</h3>
+        <p>The system uses a <strong>Genetic Algorithm (GA)</strong> — an evolutionary optimization technique — to learn
+        the best weight matrix for classifying delivery priority.</p>
 
-        The system uses a **Genetic Algorithm (GA)** — an evolutionary optimization technique — to learn
-        the best weight matrix for classifying delivery priority.
+        <h4>Why Genetic Algorithm?</h4>
+        <p>Traditional classifiers assume linear separability. The GA evolves weights through <strong>selection,
+        crossover, and mutation</strong> — finding non-obvious solutions that a gradient descent might miss,
+        especially on imbalanced datasets like ours.</p>
 
-        #### Why Genetic Algorithm?
-        Traditional classifiers assume linear separability. The GA evolves weights through **selection,
-        crossover, and mutation** — finding non-obvious solutions that a gradient descent might miss,
-        especially on imbalanced datasets like ours.
-
-        #### Training Process
-        """)
+        <h4>Training Process</h4>
+        </div>
+        """, unsafe_allow_html=True)
 
         col1, col2 = st.columns(2)
         with col1:
             st.markdown("""
-            **Population & Fitness**
-            - Population size: **100 weight matrices**
-            - Each matrix: `(num_features × num_classes)`
-            - Fitness function: **Balanced Accuracy Score**
-              (handles class imbalance — rewards correctly classifying rare High-priority deliveries)
-            """)
+            <div class="white-text">
+            <strong>Population & Fitness</strong>
+            <ul>
+                <li>Population size: <strong>100 weight matrices</strong></li>
+                <li>Each matrix: <code>(num_features × num_classes)</code></li>
+                <li>Fitness function: <strong>Balanced Accuracy Score</strong></li>
+            </ul>
+            </div>
+            """, unsafe_allow_html=True)
         with col2:
             st.markdown("""
-            **Evolution Steps (200 generations)**
-            1. Sort population by fitness
-            2. Keep top 10 elites (elitism)
-            3. Crossover: blend top-15 parents
-            4. Mutation (20% chance): add Gaussian noise
-            5. Repeat until convergence
-            """)
+            <div class="white-text">
+            <strong>Evolution Steps (200 generations)</strong>
+            <ol>
+                <li>Sort population by fitness</li>
+                <li>Keep top 10 elites (elitism)</li>
+                <li>Crossover: blend top-15 parents</li>
+                <li>Mutation (20% chance): add Gaussian noise</li>
+                <li>Repeat until convergence</li>
+            </ol>
+            </div>
+            """, unsafe_allow_html=True)
 
         st.markdown("""
-        #### Data Preparation
-        | Feature | Description |
-        |---------|-------------|
-        | `Delivery_Time` | Expected delivery duration (minutes) |
-        | `Traffic` | Road congestion: Low / Medium / High / Jam |
-        | `Weather` | Conditions: Sunny / Cloudy / Rainy / Stormy etc. |
-        | `Category` | Package type: Grocery, Medicine, Electronics… |
-
-        **80/20 stratified split** ensures High and Medium labels (minority classes) appear in both
-        training and test sets proportionally.
-        """)
+        <div class="white-text">
+        <h4>Data Preparation</h4>
+        <table style="width:100%; border-collapse: collapse;">
+            <tr style="background-color: #0d1625;">
+                <th>Feature</th><th>Description</th>
+            </tr>
+            <tr><td><code>Delivery_Time</code></td><td>Expected delivery duration (minutes)</td></tr>
+            <tr><td><code>Traffic</code></td><td>Road congestion: Low / Medium / High / Jam</td></tr>
+            <tr><td><code>Weather</code></td><td>Conditions: Sunny / Cloudy / Rainy / Stormy etc.</td></tr>
+            <tr><td><code>Category</code></td><td>Package type: Grocery, Medicine, Electronics…</td></tr>
+        </table>
+        <br>
+        <p><strong>80/20 stratified split</strong> ensures High and Medium labels appear in both training and test sets proportionally.</p>
+        </div>
+        """, unsafe_allow_html=True)
 
     with tab2:
         st.markdown("""
-        ### Priority Classification Rules
-
-        The priority labelling is injected into training data **before** the GA learns from it:
-        """)
+        <div class="white-text">
+        <h3>Priority Classification Rules</h3>
+        <p>The priority labelling is injected into training data <strong>before</strong> the GA learns from it:</p>
+        </div>
+        """, unsafe_allow_html=True)
 
         st.code("""
 # From train_model.py — the ground truth rules
@@ -978,91 +1032,69 @@ df.loc[df['Priority_Level'].isna(), 'Priority_Level'] = 'Low'
         """, language="python")
 
         st.markdown("""
-        | Traffic | Weather | Priority |
-        |---------|---------|----------|
-        | Jam | Stormy | 🔴 **HIGH** |
-        | Jam | Any other | 🟡 **MEDIUM** |
-        | High | Stormy / Rainy | 🟡 **MEDIUM** |
-        | Stormy (any traffic) | — | 🟡 **MEDIUM** |
-        | Anything else | Anything else | 🟢 **LOW** |
-
-        The GA then **learns** these patterns from data (rather than hardcoding them), so it
-        generalises to unseen weather/traffic combinations it wasn't explicitly told about.
-        """)
+        <div class="white-text">
+        <table style="width:100%; border-collapse: collapse;">
+            <tr style="background-color: #0d1625;">
+                <th>Traffic</th><th>Weather</th><th>Priority</th>
+            </tr>
+            <tr><td>Jam</td><td>Stormy</td><td>🔴 <strong>HIGH</strong></td></tr>
+            <tr><td>Jam</td><td>Any other</td><td>🟡 <strong>MEDIUM</strong></td></tr>
+            <tr><td>High</td><td>Stormy / Rainy</td><td>🟡 <strong>MEDIUM</strong></td></tr>
+            <tr><td>Stormy</td><td>—</td><td>🟡 <strong>MEDIUM</strong></td></tr>
+            <tr><td>Else</td><td>Else</td><td>🟢 <strong>LOW</strong></td></tr>
+        </table>
+        <p><br>The GA <strong>learns</strong> these patterns from data, allowing it to generalize to unseen combinations.</p>
+        </div>
+        """, unsafe_allow_html=True)
 
     with tab3:
         st.markdown("""
-        ### Vehicle Escalation Logic
-
-        When a delivery is classified as High or Medium priority, the system checks whether
-        the assigned vehicle is adequate. If not, it **escalates** up the vehicle ladder:
-
-        ```
-        Bicycle → Motorcycle → Scooter → Van → Truck
-        ```
-
-        | Priority | Min Required | Action |
-        |----------|-------------|--------|
-        | 🔴 High   | Van         | Escalate to Van if below |
-        | 🟡 Medium | Scooter     | Escalate to Scooter if below |
-        | 🟢 Low    | Any         | No escalation |
-
-        #### Fleet Capacity (priority_engine.py)
-        | Vehicle | Capacity |
-        |---------|---------|
-        | Bicycle | 1,000 orders |
-        | Motorcycle | 5,000 orders |
-        | Scooter | 3,000 orders |
-        | Van | 100,000 orders |
-
-        Orders are **sorted by urgency first** (High → Medium → Low) before allocation,
-        so critical deliveries always get a vehicle before lower-priority ones.
-        """)
+        <div class="white-text">
+        <h3>Vehicle Escalation Logic</h3>
+        <p>If a vehicle is inadequate for the priority level, it <strong>escalates</strong> up the ladder:</p>
+        <code style="display:block; padding:10px; background:#0d1625; margin-bottom:10px;">Bicycle → Motorcycle → Scooter → Van → Truck</code>
+        <table style="width:100%; border-collapse: collapse;">
+            <tr style="background-color: #0d1625;">
+                <th>Priority</th><th>Min Required</th><th>Action</th>
+            </tr>
+            <tr><td>🔴 High</td><td>Van</td><td>Escalate to Van if below</td></tr>
+            <tr><td>🟡 Medium</td><td>Scooter</td><td>Escalate to Scooter if below</td></tr>
+            <tr><td>🟢 Low</td><td>Any</td><td>No escalation</td></tr>
+        </table>
+        <h4>Fleet Capacity</h4>
+        <ul>
+            <li>Bicycle: 1,000 orders</li>
+            <li>Motorcycle: 5,000 orders</li>
+            <li>Scooter: 3,000 orders</li>
+            <li>Van: 100,000 orders</li>
+        </ul>
+        </div>
+        """, unsafe_allow_html=True)
 
     with tab4:
         st.markdown("""
-        ### System Architecture
-
-        ```
-        project/
-        ├── src/
-        │   ├── app.py              ← This Streamlit app
-        │   ├── train_model.py      ← GA training (80/20 split, 200 gens)
-        │   ├── predict_priority.py ← Batch prediction on full dataset
-        │   ├── priority_engine.py  ← Fleet allocation + escalation
-        │   └── run_prototype.py    ← CLI pipeline runner
-        └── data/
-            ├── amazon_delivery_with_priority.csv   ← Input dataset
-            ├── trained_ga_model.pkl                ← Saved model weights
-            ├── delivery_simulation_output.csv      ← Fleet allocation results
-            └── training_results_chart.png          ← Confusion matrix
-        ```
-
-        #### Data Flow
-        ```
-        CSV Dataset
-            ↓  train_model.py (GA)
-        trained_ga_model.pkl
-            ↓  predict_priority.py
-        Dataset + Priority_Level column
-            ↓  priority_engine.py
-        delivery_simulation_output.csv (Status + Escalated)
-            ↓  app.py
-        Live Dashboard + Map + Parcel Entry UI
-        ```
-
-        #### Live Weather Integration
-        The Map Inspector fetches **real weather** from **Open-Meteo API** (free, no API key):
-        ```
-        https://api.open-meteo.com/v1/forecast?latitude=...&longitude=...
-        &current=weather_code,wind_speed_10m,precipitation,temperature_2m
-        ```
-        WMO weather codes are mapped to: Sunny / Cloudy / Rainy / Stormy / Windy / Drizzle / Foggy
-        """)
+        <div class="white-text">
+        <h3>System Architecture</h3>
+        <pre style="color: white; background: #0d1625; padding: 15px;">
+project/
+├── src/
+│   ├── app.py              ← Streamlit UI
+│   ├── train_model.py      ← GA training
+│   ├── priority_engine.py  ← Fleet allocation
+└── data/
+    ├── input.csv           ← Dataset
+    └── model.pkl           ← Saved Weights
+        </pre>
+        <h4>Data Flow</h4>
+        <p>CSV Dataset → GA Training → Predicted Priorities → Fleet Allocation → Dashboard UI</p>
+        <h4>Live Weather Integration</h4>
+        <p>The Map Inspector fetches <strong>real weather</strong> from <strong>Open-Meteo API</strong>.</p>
+        </div>
+        """, unsafe_allow_html=True)
 
     st.markdown("---")
     st.markdown("""
-    <div style="text-align:center;color:#334155;font-size:12px;padding:20px;">
+    <div style="text-align:center;color:white;font-size:12px;padding:20px;">
         DeliveryIQ · Smart Goods Priority Optimization · Sri Lanka<br/>
         Genetic Algorithm · Real-time Weather · Fleet Escalation
     </div>
@@ -1078,3 +1110,7 @@ elif page == "map":
     render_map_inspector()
 elif page == "parcel":
     render_parcel_entry()
+elif page == "fleet":
+    render_fleet_optimization()
+elif page == "about":
+    render_about_page()
