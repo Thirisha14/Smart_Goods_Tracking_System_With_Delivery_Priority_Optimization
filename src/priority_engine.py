@@ -45,14 +45,15 @@ print("\n--- Priority Scheduling Applied ---")
 print(df[["Order_ID", "Priority_Level"]].head(10))
 
 # ─────────────────────────────────────────────
-# FLEET ALLOCATION & ESCALATION
+# FLEET ALLOCATION & ESCALATION (UPDATED)
 # ─────────────────────────────────────────────
+# INCREASED CAPACITY to handle more orders and improve success rate
 CAPACITY = {
-    "bicycle": 1500,
-    "motorcycle": 4500,
-    "scooter": 3000,
-    "van": 9000,
-    "truck": 5000
+    "bicycle": 5000,     # Increased from 1500
+    "motorcycle": 10000,  # Increased from 4500
+    "scooter": 8000,      # Increased from 3000
+    "van": 25000,         # Increased from 9000
+    "truck": 15000        # Increased from 5000
 }
 
 ESCALATION_MIN = {
@@ -65,15 +66,21 @@ ladder = ["bicycle", "motorcycle", "scooter", "van", "truck"]
 vehicle_load = {v: 0 for v in CAPACITY}
 
 # ─────────────────────────────────────────────
-# Low-priority allocation fraction
+# Low-priority allocation fraction (INCREASED)
 # ─────────────────────────────────────────────
-LOW_PRIORITY_SHARE = 0.10  # reserve 10% of each vehicle capacity for Low-priority orders
+# Changed from 0.10 to 0.40 to allow more "Low" priority parcels to be delivered
+LOW_PRIORITY_SHARE = 0.40  
 low_capacity_reserved = {v: int(CAPACITY[v] * LOW_PRIORITY_SHARE) for v in CAPACITY}
 low_delivered_count = {v: 0 for v in CAPACITY}
 
 results = []
 
-for _, row in df.iterrows():
+# Sort by priority before processing (High -> Medium -> Low) 
+# This ensures the most important orders grab capacity first
+df['priority_rank'] = df['Priority_Level'].map({'High': 0, 'Medium': 1, 'Low': 2})
+df_sorted = df.sort_values('priority_rank').drop('priority_rank', axis=1)
+
+for _, row in df_sorted.iterrows():
     original_v = str(row.get("Vehicle", "motorcycle")).lower()
     priority = row["Priority_Level"]
 
@@ -83,6 +90,7 @@ for _, row in df.iterrows():
     # 🔴 Priority escalation
     min_req = ESCALATION_MIN.get(priority)
     if min_req:
+        # Default to index 1 (motorcycle) if vehicle not in ladder
         orig_idx = ladder.index(original_v) if original_v in ladder else 1
         min_idx = ladder.index(min_req)
         if orig_idx < min_idx:
@@ -99,7 +107,7 @@ for _, row in df.iterrows():
             vehicle_load[assigned_v] += 1
             low_delivered_count[assigned_v] += 1
     else:
-        # High & Medium orders use remaining capacity
+        # High & Medium orders use remaining capacity (60% in this case)
         if vehicle_load[assigned_v] < CAPACITY[assigned_v] - low_capacity_reserved[assigned_v]:
             status = "Delivered"
             vehicle_load[assigned_v] += 1
@@ -111,7 +119,6 @@ for _, row in df.iterrows():
         "Status": status,
         "Escalated": "Yes" if escalated else "No"
     })
-
 # ─────────────────────────────────────────────
 # SAVE OUTPUT
 # ─────────────────────────────────────────────

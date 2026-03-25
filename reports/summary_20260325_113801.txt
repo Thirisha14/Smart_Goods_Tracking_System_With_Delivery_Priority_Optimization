@@ -1,0 +1,15 @@
+==================================================
+ DELIVERY PERFORMANCE REPORT
+==================================================
+
+Total Orders:      43739
+Delivered:         33618 (76.86%)
+Pending:           10121
+
+--- Delivery Success by Priority ---
+Priority_Level
+High      100.000000
+Low        63.244932
+Medium     69.718793
+
+==================================================
