@@ -55,27 +55,27 @@ if "Weather" in df.columns:
 print("\nTraffic values:", df["Traffic"].unique())
 print("Weather values:", df["Weather"].unique())
 
-print("\nTraffic vs Weather table:")
-print(pd.crosstab(df["Traffic"], df["Weather"]))
-
 # ─────────────────────────────────────────────
-# PRIORITY LABELLING
+# ✅ FIXED PRIORITY LABELLING
 # ─────────────────────────────────────────────
 df["Priority_Level"] = "Low"
 
-# HIGH PRIORITY
-df.loc[
+# HIGH condition (strict)
+high_condition = (
     (df["Traffic"].isin(["Jam", "High"])) &
-    (df["Weather"].isin(["Stormy", "Rainy"])),
-    "Priority_Level"
-] = "High"
+    (df["Weather"].isin(["Stormy", "Rainy"]))
+)
 
-# MEDIUM PRIORITY
-df.loc[
-    (df["Traffic"].isin(["Jam", "High"])) |
-    (df["Weather"].isin(["Stormy", "Rainy"])),
-    "Priority_Level"
-] = "Medium"
+# MEDIUM condition (excluding HIGH)
+medium_condition = (
+    (
+        (df["Traffic"].isin(["Jam", "High"])) |
+        (df["Weather"].isin(["Stormy", "Rainy"]))
+    ) & (~high_condition)
+)
+
+df.loc[high_condition, "Priority_Level"] = "High"
+df.loc[medium_condition, "Priority_Level"] = "Medium"
 
 print("\nPriority distribution:")
 print(df["Priority_Level"].value_counts())
